@@ -26,7 +26,7 @@ end
 * event: d3d_present
 * desc : Event called when the Direct3D device is presenting a scene.
 --]]
-inventoryTracker.DrawWindow = function(settings)
+inventoryTracker.DrawWindow = function(settings, userSettings)
     -- Obtain the player entity..
 
     local player = AshitaCore:GetMemoryManager():GetPlayer();
@@ -62,14 +62,11 @@ inventoryTracker.DrawWindow = function(settings)
 
     imgui.SetNextWindowSize({-1, -1}, ImGuiCond_Always);
 		
-	local windowFlags = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoBringToFrontOnFocus);
-	if (gConfig.lockPositions) then
-		windowFlags = bit.bor(windowFlags, ImGuiWindowFlags_NoMove);
-	end
-    if (imgui.Begin('InventoryTracker', true, windowFlags)) then
+    if (imgui.Begin('InventoryTracker', true, bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground))) then
 
 		imgui.Dummy({winSizeX,winSizeY});
 		local locX, locY = imgui.GetWindowPos();
+		local invSlot = 0;
 
 		for i = 1, maxBagSlots do
 			local groupNum = math.ceil(i / numPerGroup);
@@ -81,10 +78,10 @@ inventoryTracker.DrawWindow = function(settings)
 			x = x + ((groupNum - 1) * groupOffsetX);
 
 			if (i > usedBagSlots) then
-				draw_circle({x + locX + imgui.GetStyle().FramePadding.x, y + locY}, settings.dotRadius, {0, .07, .17, 1}, settings.dotRadius * 3, true)
+				draw_circle({x + locX + imgui.GetStyle().FramePadding.x, y + locY}, settings.dotRadius, {0, 0, 0, 1}, settings.dotRadius * 3, true)
 			else
-				draw_circle({x + locX + imgui.GetStyle().FramePadding.x, y + locY}, settings.dotRadius, {.37, .7, .88, 1}, settings.dotRadius * 3, true)
-				draw_circle({x + locX + imgui.GetStyle().FramePadding.x, y + locY}, settings.dotRadius, {0, .07, .17, 1}, settings.dotRadius * 3, false)
+				draw_circle({x + locX + imgui.GetStyle().FramePadding.x, y + locY}, settings.dotRadius, {.1, 0.9, 1, 1}, settings.dotRadius * 3, true)
+				draw_circle({x + locX + imgui.GetStyle().FramePadding.x, y + locY}, settings.dotRadius, {0, 0, 0, 1}, settings.dotRadius * 3, false)
 			end
 		end
 

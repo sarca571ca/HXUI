@@ -33,52 +33,6 @@ end
 function GetColorOfTarget(targetEntity, targetIndex)
     -- Obtain the entity spawn flags..
 
-	local color = 0xFFFFFFFF;
-	if (targetIndex == nil) then
-		return color;
-	end
-    local flag = targetEntity.SpawnFlags;
-
-    -- Determine the entity type and apply the proper color
-    if (bit.band(flag, 0x0001) == 0x0001) then --players
-		local party = AshitaCore:GetMemoryManager():GetParty();
-		for i = 0, 17 do
-			if (party:GetMemberIsActive(i) == 1) then
-				if (party:GetMemberTargetIndex(i) == targetIndex) then
-					color = 0xFF00FFFF;
-					break;
-				end
-			end
-		end
-    elseif (bit.band(flag, 0x0002) == 0x0002) then --npc
-        color = 0xFF66FF66;
-    else --mob
-		local entMgr = AshitaCore:GetMemoryManager():GetEntity();
-		local claimStatus = entMgr:GetClaimStatus(targetIndex);
-		local claimId = bit.band(claimStatus, 0xFFFF);
---		local isClaimed = (bit.band(claimStatus, 0xFFFF0000) ~= 0);
-
-		if (claimId == 0) then
-			color = 0xFFFFFF66;
-		else
-			color = 0xFFFF66FF;
-			local party = AshitaCore:GetMemoryManager():GetParty();
-			for i = 0, 17 do
-				if (party:GetMemberIsActive(i) == 1) then
-					if (party:GetMemberServerId(i) == claimId) then
-						color = 0xFFFF6666;
-						break;
-					end;
-				end
-			end
-		end
-	end
-	return color;
-end
-
-function GetColorOfTargetRGBA(targetEntity, targetIndex)
-    -- Obtain the entity spawn flags..
-
 	local color = {1,1,1,1};
 	if (targetIndex == nil) then
 		return color;
@@ -162,8 +116,7 @@ function LoadTexture(textureName)
     local texture_ptr = ffi.new('IDirect3DTexture8*[1]');
     local res = C.D3DXCreateTextureFromFileA(d3d8dev, string.format('%s/assets/%s.png', addon.path, textureName), texture_ptr);
     if (res ~= C.S_OK) then
---      error(('Failed to load image texture: %08X (%s)'):fmt(res, d3d.get_error(res)));
-        return nil;
+        error(('Failed to load image texture: %08X (%s)'):fmt(res, d3d.get_error(res)));
     end;
     textures.image = ffi.new('IDirect3DTexture8*', texture_ptr[0]);
     d3d.gc_safe_release(textures.image);
@@ -183,27 +136,28 @@ function FormatInt(number)
 	return minus .. int:reverse():gsub("^,", "") .. fraction
 end
 
-local function GetIndexFromId(id)
+function LimitStringLength(string, length)
+	local output = '';
+	for i = 1, #string do
+		output = output..string[i];
+		if (#output >= length) then
+			break;
+		end
+	end
+	return output;
+end
+
+function GetIndexFromId(serverId)
+    local index = bit.band(serverId, 0x7FF);
     local entMgr = AshitaCore:GetMemoryManager():GetEntity();
-    
-    --Shortcut for monsters/static npcs..
-    if (bit.band(id, 0x1000000) ~= 0) then
-        local index = bit.band(id, 0xFFF);
-        if (index >= 0x900) then
-            index = index - 0x100;
-        end
-
-        if (index < 0x900) and (entMgr:GetServerId(index) == id) then
-            return index;
-        end
+    if (entMgr:GetServerId(index) == serverId) then
+        return index;
     end
-
-    for i = 1,0x8FF do
-        if entMgr:GetServerId(i) == id then
+    for i = 1,2303 do
+        if entMgr:GetServerId(i) == serverId then
             return i;
         end
     end
-
     return 0;
 end
 
@@ -230,15 +184,7 @@ function ParseActionPacket(e)
     --Unknown 4 bits
     bitOffset = bitOffset + 4;
     actionPacket.Type = UnpackBits(4);
-    -- Bandaid fix until we have more flexible packet parsing
-    if actionPacket.Type == 8 or actionPacket.Type == 9 then
-        actionPacket.Param = UnpackBits(16);
-        actionPacket.SpellGroup = UnpackBits(16);
-    else
-        -- Not every action packet has the same data at the same offsets so we just skip this for now
-        actionPacket.Param = UnpackBits(32);
-    end
-
+    actionPacket.Id = UnpackBits(32);
     actionPacket.Recast = UnpackBits(32);
 
     actionPacket.Targets = T{};
@@ -291,6 +237,106 @@ function ParseActionPacket(e)
     end
 end
 
+--[[
+function ParseActionPacket_Windower(e)
+    -- Collect top-level metadata. The category field will provide the context
+    -- for the rest of the packet - that should be enough information to figure
+    -- out what each target and action field are used for.
+    local maxLength = e.size * 8;
+    local packet = e.data_raw;
+    local function UnpackBits_Safe(bitData, bitOffset, length)
+        if ((bitOffset + length) >= maxLength) then
+            maxLength = 0; --Using this as a flag since any malformed fields mean the data is trash anyway.
+            return 0;
+        end
+        return ashita.bits.unpack_be(bitData, 0, bitOffset, length);
+    end
+
+    ---@type ActionPacket
+    local action = {
+        -- Windower code leads me to believe param and recast might be at
+        -- different indices - 102 and 134, respectively. Confusing.
+        actor_id     = UnpackBits_Safe(packet,  40, 32),
+        target_count = UnpackBits_Safe(packet,  72,  8),
+        category     = UnpackBits_Safe(packet,  82,  4),
+        param        = UnpackBits_Safe(packet,  86, 10),
+        recast       = UnpackBits_Safe(packet, 118, 10),
+        unknown      = 0,
+        targets      = {}
+    }
+
+    local bit_offset = 150
+
+    -- Collect target information. The ID is the server ID, not the entity idx.
+    for i = 1, action.target_count do
+        action.targets[i] = {
+            id           = UnpackBits_Safe(packet, bit_offset,      32),
+            action_count = UnpackBits_Safe(packet, bit_offset + 32,  4),
+            actions      = {}
+        }
+
+        -- Collect per-target action information. This is where more identifiers
+        -- for what's being used lie - often the animation can be used for that
+        -- purpose. Otherwise the message may be what you want.
+        for j = 1, action.targets[i].action_count do
+            action.targets[i].actions[j] = {
+                reaction  = UnpackBits_Safe(packet, bit_offset + 36,  5),
+                animation = UnpackBits_Safe(packet, bit_offset + 41, 11),
+                effect    = UnpackBits_Safe(packet, bit_offset + 53,  2),
+                stagger   = UnpackBits_Safe(packet, bit_offset + 55,  7),
+                param     = UnpackBits_Safe(packet, bit_offset + 63, 17),
+                message   = UnpackBits_Safe(packet, bit_offset + 80, 10),
+                unknown   = UnpackBits_Safe(packet, bit_offset + 90, 31)
+            }
+
+            -- Collect additional effect information for the action. This is
+            -- where you'll find information about skillchains, enspell damage,
+            -- et cetera.
+            if UnpackBits_Safe(packet, bit_offset + 121, 1) == 1 then
+                action.targets[i].actions[j].has_add_effect       = true
+                action.targets[i].actions[j].add_effect_animation = UnpackBits_Safe(packet, bit_offset + 122, 10)
+                action.targets[i].actions[j].add_effect_effect    = nil -- unknown value
+                action.targets[i].actions[j].add_effect_param     = UnpackBits_Safe(packet, bit_offset + 132, 17)
+                action.targets[i].actions[j].add_effect_message   = UnpackBits_Safe(packet, bit_offset + 149, 10)
+
+                bit_offset = bit_offset + 37
+            else
+                action.targets[i].actions[j].has_add_effect       = false
+                action.targets[i].actions[j].add_effect_animation = nil
+                action.targets[i].actions[j].add_effect_effect    = nil
+                action.targets[i].actions[j].add_effect_param     = nil
+                action.targets[i].actions[j].add_effect_message   = nil
+            end
+
+            -- Collect spike effect information for the action.
+            if ashita.bits.unpack_be(packet, bit_offset + 122, 1) == 1 then
+                action.targets[i].actions[j].has_spike_effect       = true
+                action.targets[i].actions[j].spike_effect_animation = UnpackBits_Safe(packet, bit_offset + 123, 10)
+                action.targets[i].actions[j].spike_effect_effect    = nil -- unknown value
+                action.targets[i].actions[j].spike_effect_param     = UnpackBits_Safe(packet, bit_offset + 133, 14)
+                action.targets[i].actions[j].spike_effect_message   = UnpackBits_Safe(packet, bit_offset + 147, 10)
+
+                bit_offset = bit_offset + 34
+            else
+                action.targets[i].actions[j].has_spike_effect       = false
+                action.targets[i].actions[j].spike_effect_animation = nil
+                action.targets[i].actions[j].spike_effect_effect    = nil
+                action.targets[i].actions[j].spike_effect_param     = nil
+                action.targets[i].actions[j].spike_effect_message   = nil
+            end
+
+            bit_offset = bit_offset + 87
+        end
+
+        bit_offset = bit_offset + 36
+    end
+
+    if (maxLength ~= 0 and action.target_count > 0) then
+        return action
+    end
+end
+]]--
+
 function ParseMobUpdatePacket(e)
 	if (e.id == 0x00E) then
 		local mobPacket = T{};
@@ -302,6 +348,30 @@ function ParseMobUpdatePacket(e)
 		end
 		return mobPacket;
 	end
+end
+
+function GetIndexFromId(serverId)
+    local index = bit.band(serverId, 0x7FF);
+    local entMgr = AshitaCore:GetMemoryManager():GetEntity();
+    if (entMgr:GetServerId(index) == serverId) then
+        return index;
+    end
+    for i = 1,2303 do
+        if entMgr:GetServerId(i) == serverId then
+            return i;
+        end
+    end
+    return 0;
+end
+
+function has_value (tab, val)
+    for index, value in ipairs(tab) do
+        if value == val then
+            return true
+        end
+    end
+
+    return false
 end
 
 function deep_copy_table(orig)
@@ -349,28 +419,22 @@ function IsMemberOfParty(targetIndex)
 	return false;
 end
 
-function DrawStatusIcons(statusIds, iconSize, maxColumns, maxRows, drawBg, xOffset)
+function DrawStatusIcons(statusIds, iconSize, maxColumns, maxRows, drawBg)
 	if (statusIds ~= nil and #statusIds > 0) then
 		local currentRow = 1;
         local currentColumn = 0;
-        if (xOffset ~= nil) then
-            imgui.SetCursorPosX(imgui.GetCursorPosX() + xOffset);
-        end
+
 		for i = 0,#statusIds do
-            -- Don't check anymore after -1, as it will be all -1's
-            if (statusIds == -1) then
-                break;
-            end
-            local icon = statusHandler.get_icon_from_theme(gConfig.statusIconTheme, statusIds[i]);
+            local icon = statusHandler.get_icon_from_theme("icons",statusIds[i]);
             if (icon ~= nil) then
                 if (drawBg == true) then
                     local resetX, resetY = imgui.GetCursorScreenPos();
                     local bgIcon;
                     local isBuff = buffTable.IsBuff(statusIds[i]);
-                    local bgSize = iconSize * 1.1;
-                    local yOffset = bgSize * -0.1;
+                    local bgSize = iconSize * 1.2;
+                    local yOffset = bgSize * -0.15;
                     if (isBuff) then
-                        yOffset = bgSize * -0.3;
+                        yOffset = bgSize * -0.35;
                     end
                     imgui.SetCursorScreenPos({resetX - ((bgSize - iconSize) / 1.5), resetY + yOffset});
                     bgIcon = statusHandler.GetBackground(isBuff);
@@ -379,9 +443,7 @@ function DrawStatusIcons(statusIds, iconSize, maxColumns, maxRows, drawBg, xOffs
                     imgui.SetCursorScreenPos({resetX, resetY});
                 end
                 imgui.Image(icon, { iconSize, iconSize }, { 0, 0 }, { 1, 1 });
-                if (imgui.IsItemHovered()) then
-                    statusHandler.render_tooltip(statusIds[i]);
-                end
+
                 currentColumn = currentColumn + 1;
                 -- Handle multiple rows
                 if (currentColumn < maxColumns) then
@@ -390,9 +452,6 @@ function DrawStatusIcons(statusIds, iconSize, maxColumns, maxRows, drawBg, xOffs
                     currentRow = currentRow + 1;
                     if (currentRow > maxRows) then
                         return;
-                    end
-                    if (xOffset ~= nil) then
-                        imgui.SetCursorPosX(imgui.GetCursorPosX() + xOffset);
                     end
                     currentColumn = 0;
                 end
@@ -441,47 +500,3 @@ function GetTargets()
     return mainTarget, secondaryTarget;
 end
 
-function GetJobStr(jobIdx)
-    if (jobIdx == nil or jobIdx == 0 or jobIdx == -1) then
-        return '';
-    end
-
-    return AshitaCore:GetResourceManager():GetString("jobs.names_abbr", jobIdx);
-end
-
--- Easing function for HP bar interpolation
--- Reference: https://easings.net/
-function easeOutPercent(percent)
-    -- Ease out exponential
-    if percent < 1 then
-        return 1 - math.pow(2, -10 * percent);
-    else
-        return percent;
-    end
-
-    -- Ease out quart
-    -- return 1 - math.pow(1 - percent, 4);
-
-    -- Ease out quint
-    -- return 1 - math.pow(1 - percent, 5);
-end
-
-function GetHpColors(hpPercent)
-    local hpNameColor;
-    local hpGradient;
-    if (hpPercent < .25) then 
-        hpNameColor = 0xFFFF0000;
-        hpGradient = {"#ec3232", "#f16161"};
-    elseif (hpPercent < .50) then;
-        hpNameColor = 0xFFFFA500;
-        hpGradient = {"#ee9c06", "#ecb44e"};
-    elseif (hpPercent < .75) then
-        hpNameColor = 0xFFFFFF00;
-        hpGradient = {"#ffff0c", "#ffff97"};
-    else
-        hpNameColor = 0xFFFFFFFF;
-        hpGradient = {"#e26c6c", "#fa9c9c"};
-    end
-
-    return hpNameColor, hpGradient;
-end

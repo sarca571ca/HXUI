@@ -23,12 +23,13 @@
 ]]--
 
 addon.name      = 'HXUI';
-addon.author    = 'Team HXUI (Tirem, Shuu, colorglut, RheaCloud)';
-addon.version   = '1.1.1';
+addon.author    = 'Tirem (Programmer) & Shuu (Designer)';
+addon.version   = '0.1.0';
 addon.desc      = 'Multiple UI elements with manager';
 addon.link      = 'https://github.com/tirem/HXUI'
 
 require('common');
+local imgui = require('imgui');
 local settings = require('settings');
 local playerBar = require('playerbar');
 local targetBar = require('targetbar');
@@ -37,75 +38,11 @@ local expBar = require('expbar');
 local gilTracker = require('giltracker');
 local inventoryTracker = require('inventorytracker');
 local partyList = require('partylist');
-local castBar = require('castbar');
 local configMenu = require('configmenu');
 local debuffHandler = require('debuffhandler');
-local patchNotes = require('patchNotes');
-local statusHandler = require('statushandler');
-
--- =================
--- = HXUI DEV ONLY =
--- =================
--- Hot reloading of development files functionality
-local _HXUI_DEV_HOT_RELOADING_ENABLED = false;
-local _HXUI_DEV_HOT_RELOAD_POLL_TIME_SECONDS = 1;
-local _HXUI_DEV_HOT_RELOAD_LAST_RELOAD_TIME;
-local _HXUI_DEV_HOT_RELOAD_FILES = {};
-
-function string:split(sep)
-   local sep, fields = sep or ":", {}
-   local pattern = string.format("([^%s]+)", sep)
-   self:gsub(pattern, function(c) fields[#fields+1] = c end)
-   return fields
-end
-
-function _check_hot_reload()
-	local path = string.gsub(addon.path, '\\\\', '\\');
-
-	local result = io.popen("forfiles /P " .. path .. ' /M *.lua /C "cmd /c echo @file @fdate @ftime"');
-
-	local needsReload = false;
-
-	for line in result:lines() do
-		if #line > 0 then
-			local splitLine = line:split(" ");
-			local filename = splitLine[1];
-			local dateModified = splitLine[2];
-			local timeModified = splitLine[3];
-
-			filename = string.gsub(filename, '"', '');
-
-			local fileTable = {dateModified, timeModified};
-
-			if _HXUI_DEV_HOT_RELOAD_FILES[filename] ~= nil then
-				if table.concat(_HXUI_DEV_HOT_RELOAD_FILES[filename]) ~= table.concat(fileTable) then
-					needsReload = true;
-					print("[HXUI] Development file " .. filename .. " changed, reloading HXUI.")
-				end
-			end
-
-			_HXUI_DEV_HOT_RELOAD_FILES[filename] = fileTable;
-		end
-	end
-
-	result:close();
-
-	if needsReload then
-		AshitaCore:GetChatManager():QueueCommand(-1, '/addon reload hxui', channelCommand);
-	end
-end
--- ==================
--- = /HXUI DEV ONLY =
--- ==================
 
 local user_settings = 
 T{
-	patchNotesVer = -1,
-
-	noBookendRounding = 4,
-	lockPositions = false,
-
-
 	showPlayerBar = true,
 	showTargetBar = true,
 	showEnemyList = true,
@@ -113,63 +50,43 @@ T{
 	showGilTracker = true,
 	showInventoryTracker = true,
 	showPartyList = true,
-	showCastBar = true,
 
-	statusIconTheme = 'XIView';
-	jobIconTheme = 'FFXI',
+	barRoundness = 6.0,
 
 	showPartyListWhenSolo = false,
 	maxEnemyListEntries = 8,
+	showTargetBarPercent = true,
 
 	playerBarScaleX = 1,
 	playerBarScaleY = 1,
 	playerBarFontOffset = 0,
-	showPlayerBarBookends = true,
-	alwaysShowMpBar = true,
 
 	targetBarScaleX = 1,
 	targetBarScaleY = 1,
-	targetBarFontOffset = 0,
+	targetBarFontScale = 1,
 	targetBarIconScale = 1,
-	showTargetBarBookends = true,
-	showEnemyId = false;
-	alwaysShowHealthPercent = false,
 
 	enemyListScaleX = 1,
 	enemyListScaleY = 1,
 	enemyListFontScale = 1,
 	enemyListIconScale = 1,
-	showEnemyListBookends = true,
 
 	expBarScaleX = 1,
 	expBarScaleY = 1,
-	showExpBarBookends = true,
 	expBarFontOffset = 0,
 
 	gilTrackerScale = 1,
 	gilTrackerFontOffset = 0,
 
-	inventoryTrackerScale = 1,
+	inventoryTrackerScale= 1,
 	inventoryTrackerFontOffset = 0,
 
 	partyListScaleX = 1,
 	partyListScaleY = 1,
 	partyListBuffScale = 1,
 	partyListFontOffset = 0,
-	partyListStatusTheme = 0, -- 0: HorizonXI-L, 1: HorizonXI-R 2: XIV1.0, 3: XIV, 4: Disabled
-	partyListTheme = 0, 
-	partyListBgOpacity = 200;
-	showPartyListBookends = true,
-	partyListCursor = 'GreyArrow.png',
-	partyListBackground = 'BlueGradient.png',
-	partyListEntrySpacing = 0,
-
-	castBarScaleX = 1,
-	castBarScaleY = 1,
-	showCastBarBookends = true,
-	castBarFontOffset = 0,
-
-	healthBarFlashEnabled = true,
+	partyListStatusTheme = 0;
+	partyListTheme = 0; -- 0: HorizonXI, 1: XIV1.0, 2: XIV
 };
 
 local user_settings_container = 
@@ -179,117 +96,36 @@ T{
 
 local default_settings =
 T{
-	-- global settings
-	currentPatchVer = 2,
-	tpEmptyColor = 0xFF9acce8,
-	tpFullColor = 0xFF2fa9ff,
-	mpColor = 0xFFdef2db,
-
 	-- settings for the targetbar
 	targetBarSettings =
 	T{
-		-- Damage interpolation
-		hitInterpolationDecayPercentPerSecond = 150,
-		hitDelayDuration = 0.5,
-		hitFlashDuration = 0.4,
-
-		-- Everything else
 		barWidth = 500,
-		barHeight = 18,
-		totBarHeight = 14,
-		totBarOffset = -1,
+		barHeight = 10,
+		totBarHeight = 10,
+		totBarOffset = 1,
 		textScale = 1.2,
 		cornerOffset = 5,
 		nameXOffset = 12,
 		nameYOffset = 9,
 		iconSize = 22,
-		arrowSize = 30,
 		maxIconColumns = 12,
-		topTextYOffset = 0,
-		topTextXOffset = 5,
-		bottomTextYOffset = -3,
-		bottomTextXOffset = 15,
-		name_font_settings = 
-		T{
-			visible = true,
-			locked = true,
-			font_family = 'Consolas',
-			font_height = 13,
-			color = 0xFFFFFFFF,
-			bold = true,
-			color_outline = 0xFF000000,
-			draw_flags = 0x10,
-			background = 
-			T{
-				visible = false,
-			},
-			right_justified = false;
-		};
-		totName_font_settings = 
-		T{
-			visible = true,
-			locked = true,
-			font_family = 'Consolas',
-			font_height = 12,
-			color = 0xFFFFFFFF,
-			bold = true,
-			color_outline = 0xFF000000,
-			draw_flags = 0x10,
-			background = 
-			T{
-				visible = false,
-			},
-			right_justified = false;
-		};
-		distance_font_settings = 
-		T{
-			visible = true,
-			locked = true,
-			font_family = 'Consolas',
-			font_height = 11,
-			color = 0xFFFFFFFF,
-			bold = true,
-			color_outline = 0xFF000000,
-			draw_flags = 0x10,
-			background = 
-			T{
-				visible = false,
-			},
-			right_justified = true;
-		};
-		percent_font_settings = 
-		T{
-			visible = true,
-			locked = true,
-			font_family = 'Consolas',
-			font_height = 11,
-			color = 0xFFFFFFFF,
-			bold = true,
-			italic = true;
-			color_outline = 0xFF000000,
-			draw_flags = 0x10,
-			background = 
-			T{
-				visible = false,
-			},
-			right_justified = true;
-		};
+		font_family = 'Nexa Text-Trial Heavy Italic',
 	};
 
 	-- settings for the playerbar
 	playerBarSettings =
 	T{
-		hitInterpolationMaxTime = 0.5,
-		hitDelayLength = 0.5,
+		hitAnimSpeed = 2,
+		hitDelayLength = .5,
 		barWidth = 500,
 		barSpacing = 10,
-		barHeight = 20,
-		textYOffset = -3,
+		barHeight = 10,
+		textYOffset = -4,
 		font_settings = 
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Nexa Text-Trial Heavy Italic',
 			font_height = 15,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -322,7 +158,7 @@ T{
 	expBarSettings =
 	T{
 		barWidth = 550;
-		barHeight = 12;
+		barHeight = 10;
 		jobOffsetY = 0;
 		expOffsetY = 0;
 		percentOffsetY = 2;
@@ -331,7 +167,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Carlito',
 			font_height = 11,
 			color = 0xFFFFFFFF,
 			bold = false,
@@ -348,7 +184,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Carlito',
 			font_height = 11,
 			color = 0xFFFFFFFF,
 			bold = false,
@@ -365,7 +201,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Carlito',
 			font_height = 8,
 			color = 0xFFFFFF00,
 			bold = false,
@@ -390,7 +226,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Carlito',
 			font_height = 13,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -410,14 +246,14 @@ T{
 		columnCount = 5;
 		rowCount = 6;
 		dotRadius = 5;
-		dotSpacing = 1;
-		groupSpacing = 8;
+		dotSpacing = 2;
+		groupSpacing = 10;
 		textOffsetY = -3;
 		font_settings = 
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Carlito',
 			font_height = 13,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -437,11 +273,12 @@ T{
 		hpBarWidth = 150,
 		tpBarWidth = 100,
 		mpBarWidth = 100,
-		barHeight = 20,
-		barSpacing = 8,
+		barHeight = 10,
+		barSpacing = 0,
+		entrySpacing = 0,
 
-		nameTextOffsetX = 1,
-		nameTextOffsetY = 0,
+		nameTextOffsetX = 0,
+		nameTextOffsetY = 5,
 		hpTextOffsetX = -2,
 		hpTextOffsetY = -3,
 		mpTextOffsetX = -2,
@@ -454,27 +291,24 @@ T{
 		backgroundPaddingY1 = 0,
 		backgroundPaddingY2 = 0,
 
-		cursorPaddingX1 = 5,
-		cursorPaddingX2 = 5,
-		cursorPaddingY1 = 4,
-		cursorPaddingY2 = 4,
+		cursorPaddingX1 = 3,
+		cursorPaddingX2 = 3,
+		cursorPaddingY1 = 3,
+		cursorPaddingY2 = 3,
 		dotRadius = 3,
 
 		arrowSize = 1;
 
-		subtargetArrowTint = 0xFFfdd017,
-
-		iconSize = 22,
+		iconSize = 20,
 		maxIconColumns = 6,
 		buffOffset = 10,
-		xivBuffOffsetY = 1,
-		entrySpacing = 8,
+		xivBuffOffsetY = 5;
 
 		hp_font_settings = 
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Nexa Text-Trial Heavy Italic',
 			font_height = 13,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -491,7 +325,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Nexa Text-Trial Heavy Italic',
 			font_height = 13,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -508,7 +342,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Nexa Text-Trial Heavy Italic',
 			font_height = 13,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -525,7 +359,7 @@ T{
 		T{
 			visible = true,
 			locked = true,
-			font_family = 'Consolas',
+			font_family = 'Nexa Text-Trial Heavy Italic',
 			font_height = 13,
 			color = 0xFFFFFFFF,
 			bold = true,
@@ -538,7 +372,7 @@ T{
 			},
 			right_justified = false;
 		};
-		prim_data = {
+		primData = {
 			texture_offset_x= 0.0,
 			texture_offset_y= 0.0,
 			border_visible  = false,
@@ -556,173 +390,104 @@ T{
 			height          = 0.0,
 		};
 	};
-
-	castBarSettings =
-	T{
-		barWidth = 500,
-		barHeight = 20,
-		spellOffsetY = 0,
-		percentOffsetY = 2,
-		percentOffsetX = -10,
-		spell_font_settings = 
-		T{
-			visible = true,
-			locked = true,
-			font_family = 'Consolas',
-			font_height = 11,
-			color = 0xFFFFFFFF,
-			bold = false,
-			italic = true;
-			color_outline = 0xFF000000,
-			draw_flags = 0x10,
-			background = 
-			T{
-				visible = false,
-			},
-			right_justified = false;
-		};
-		percent_font_settings = 
-		T{
-			visible = true,
-			locked = true,
-			font_family = 'Consolas',
-			font_height = 11,
-			color = 0xFFFFFFFF,
-			bold = false,
-			italic = true;
-			color_outline = 0xFF000000,
-			draw_flags = 0x10,
-			background = 
-			T{
-				visible = false,
-			},
-			right_justified = true;
-		};
-	};
 };
 
-gAdjustedSettings = deep_copy_table(default_settings);
+local adjustedSettings = deep_copy_table(default_settings);
 local defaultUserSettings = deep_copy_table(user_settings);
 
 local config = settings.load(user_settings_container);
-gConfig = config.userSettings;
 
 showConfig = { false };
 
 function ResetSettings()
-	local patchNotesVer = gConfig.patchNotesVer;
-	gConfig = deep_copy_table(defaultUserSettings);
-	gConfig.patchNotesVer = patchNotesVer;
-	UpdateSettings();
+	config.userSettings = deep_copy_table(defaultUserSettings);
 end
 
 local function CheckVisibility()
-	if (gConfig.showPlayerBar == false) then
+	if (config.userSettings.showPlayerBar == false) then
 		playerBar.SetHidden(true);
 	end
-	if (gConfig.showExpBar == false) then
+	if (config.userSettings.showExpBar == false) then
 		expBar.SetHidden(true);
 	end
-	if (gConfig.showGilTracker == false) then
+	if (config.userSettings.showGilTracker == false) then
 		gilTracker.SetHidden(true);
 	end
-	if (gConfig.showInventoryTracker == false) then
+	if (config.userSettings.showInventoryTracker == false) then
 		inventoryTracker.SetHidden(true);
 	end
-	if (gConfig.showPartyList == false) then
+	if (config.userSettings.showPartyList == false) then
 		partyList.SetHidden(true);
 	end
-	if (gConfig.showCastBar == false) then
-		castBar.SetHidden(true);
-	end
-	if (gConfig.showTargetBar == false) then
-		targetBar.SetHidden(true);
-	end
-end
-
-local function ForceHide()
-
-	playerBar.SetHidden(true);
-	targetBar.SetHidden(true);
-	expBar.SetHidden(true);
-	gilTracker.SetHidden(true);
-	inventoryTracker.SetHidden(true);
-	partyList.SetHidden(true);
-	castBar.SetHidden(true);
 end
 
 local function UpdateFonts()
-	playerBar.UpdateFonts(gAdjustedSettings.playerBarSettings);
-	targetBar.UpdateFonts(gAdjustedSettings.targetBarSettings);
-	expBar.UpdateFonts(gAdjustedSettings.expBarSettings);
-	gilTracker.UpdateFonts(gAdjustedSettings.gilTrackerSettings);
-	inventoryTracker.UpdateFonts(gAdjustedSettings.inventoryTrackerSettings);
-	partyList.UpdateFonts(gAdjustedSettings.partyListSettings);
-	castBar.UpdateFonts(gAdjustedSettings.castBarSettings);
+	playerBar.UpdateFonts(adjustedSettings.playerBarSettings);
+	expBar.UpdateFonts(adjustedSettings.expBarSettings);
+	gilTracker.UpdateFonts(adjustedSettings.gilTrackerSettings);
+	inventoryTracker.UpdateFonts(adjustedSettings.inventoryTrackerSettings);
+	partyList.UpdateFonts(adjustedSettings.partyListSettings);
 end
 
 local function UpdateUserSettings()
     local ns = default_settings;
-	local us = gConfig;
+	local us = config.userSettings;
 
 	-- Target Bar
-	gAdjustedSettings.targetBarSettings.barWidth = ns.targetBarSettings.barWidth * us.targetBarScaleX;
-	gAdjustedSettings.targetBarSettings.barHeight = ns.targetBarSettings.barHeight * us.targetBarScaleY;
-	gAdjustedSettings.targetBarSettings.totBarHeight = ns.targetBarSettings.totBarHeight * us.targetBarScaleY;
-	gAdjustedSettings.targetBarSettings.name_font_settings.font_height = math.max(ns.targetBarSettings.name_font_settings.font_height + us.targetBarFontOffset, 1);
-    gAdjustedSettings.targetBarSettings.totName_font_settings.font_height = math.max(ns.targetBarSettings.totName_font_settings.font_height + us.targetBarFontOffset, 1);
-	gAdjustedSettings.targetBarSettings.distance_font_settings.font_height = math.max(ns.targetBarSettings.distance_font_settings.font_height + us.targetBarFontOffset, 1);
-    gAdjustedSettings.targetBarSettings.percent_font_settings.font_height = math.max(ns.targetBarSettings.percent_font_settings.font_height + us.targetBarFontOffset, 1);
-	gAdjustedSettings.targetBarSettings.iconSize = ns.targetBarSettings.iconSize * us.targetBarIconScale;
-	gAdjustedSettings.targetBarSettings.arrowSize = ns.targetBarSettings.arrowSize * us.targetBarScaleY;
+	adjustedSettings.targetBarSettings.barWidth = ns.targetBarSettings.barWidth * us.targetBarScaleX;
+	adjustedSettings.targetBarSettings.barHeight = ns.targetBarSettings.barHeight * us.targetBarScaleY;
+	adjustedSettings.targetBarSettings.totBarHeight = ns.targetBarSettings.totBarHeight * us.targetBarScaleY;
+	adjustedSettings.targetBarSettings.textScale = ns.targetBarSettings.textScale * us.targetBarFontScale;
+	adjustedSettings.targetBarSettings.iconSize = ns.targetBarSettings.iconSize * us.targetBarIconScale;
 
 	-- Party List
-    gAdjustedSettings.partyListSettings.hpBarWidth = ns.partyListSettings.hpBarWidth * us.partyListScaleX;
-    gAdjustedSettings.partyListSettings.barHeight = ns.partyListSettings.barHeight * us.partyListScaleY;
-    gAdjustedSettings.partyListSettings.tpBarWidth = ns.partyListSettings.tpBarWidth * us.partyListScaleX;
-	gAdjustedSettings.partyListSettings.mpBarWidth = ns.partyListSettings.mpBarWidth * us.partyListScaleX;
-	gAdjustedSettings.partyListSettings.barSpacing = ns.partyListSettings.barSpacing * us.partyListScaleX;
-    gAdjustedSettings.partyListSettings.hp_font_settings.font_height = math.max(ns.partyListSettings.hp_font_settings.font_height + us.partyListFontOffset, 1);
-    gAdjustedSettings.partyListSettings.mp_font_settings.font_height = math.max(ns.partyListSettings.mp_font_settings.font_height + us.partyListFontOffset, 1);
-	gAdjustedSettings.partyListSettings.tp_font_settings.font_height = math.max(ns.partyListSettings.tp_font_settings.font_height + us.partyListFontOffset, 1);
-    gAdjustedSettings.partyListSettings.name_font_settings.font_height = math.max(ns.partyListSettings.name_font_settings.font_height + us.partyListFontOffset, 1);
-	gAdjustedSettings.partyListSettings.iconSize = ns.partyListSettings.iconSize * us.partyListBuffScale;
-	gAdjustedSettings.partyListSettings.entrySpacing = ns.partyListSettings.entrySpacing + us.partyListEntrySpacing;
+    adjustedSettings.partyListSettings.hpBarWidth = ns.partyListSettings.hpBarWidth * us.partyListScaleX;
+    adjustedSettings.partyListSettings.barHeight = ns.partyListSettings.barHeight * us.partyListScaleY;
+    adjustedSettings.partyListSettings.tpBarWidth = ns.partyListSettings.tpBarWidth * us.partyListScaleX;
+	adjustedSettings.partyListSettings.mpBarWidth = ns.partyListSettings.mpBarWidth * us.partyListScaleX;
+    adjustedSettings.partyListSettings.entrySpacing = ns.partyListSettings.entrySpacing * us.partyListScaleY;
+    adjustedSettings.partyListSettings.hp_font_settings.font_height = math.max(ns.partyListSettings.hp_font_settings.font_height + us.partyListFontOffset, 1);
+    adjustedSettings.partyListSettings.mp_font_settings.font_height = math.max(ns.partyListSettings.mp_font_settings.font_height + us.partyListFontOffset, 1);
+	adjustedSettings.partyListSettings.tp_font_settings.font_height = math.max(ns.partyListSettings.tp_font_settings.font_height + us.partyListFontOffset, 1);
+    adjustedSettings.partyListSettings.name_font_settings.font_height = math.max(ns.partyListSettings.name_font_settings.font_height + us.partyListFontOffset, 1);
+	adjustedSettings.partyListSettings.backgroundPaddingX1 = ns.partyListSettings.backgroundPaddingX1 * us.partyListScaleX;
+	adjustedSettings.partyListSettings.backgroundPaddingX2 = ns.partyListSettings.backgroundPaddingX2 * us.partyListScaleX;
+	adjustedSettings.partyListSettings.backgroundPaddingY1 = ns.partyListSettings.backgroundPaddingY1 * us.partyListScaleY;
+	adjustedSettings.partyListSettings.backgroundPaddingY2 = ns.partyListSettings.backgroundPaddingY2 * us.partyListScaleY;
+	adjustedSettings.partyListSettings.cursorPaddingX1 = ns.partyListSettings.cursorPaddingX1 * us.partyListScaleX;
+	adjustedSettings.partyListSettings.cursorPaddingX2 = ns.partyListSettings.cursorPaddingX2 * us.partyListScaleX;
+	adjustedSettings.partyListSettings.cursorPaddingY1 = ns.partyListSettings.cursorPaddingY1 * us.partyListScaleY;
+	adjustedSettings.partyListSettings.cursorPaddingY2 = ns.partyListSettings.cursorPaddingY2 * us.partyListScaleY;
+	adjustedSettings.partyListSettings.iconSize = ns.partyListSettings.iconSize * us.partyListBuffScale;
 
 	-- Player Bar
-	gAdjustedSettings.playerBarSettings.barWidth = ns.playerBarSettings.barWidth * us.playerBarScaleX;
-	gAdjustedSettings.playerBarSettings.barSpacing = ns.playerBarSettings.barSpacing * us.playerBarScaleX;
-	gAdjustedSettings.playerBarSettings.barHeight = ns.playerBarSettings.barHeight * us.playerBarScaleY;
-	gAdjustedSettings.playerBarSettings.font_settings.font_height = math.max(ns.playerBarSettings.font_settings.font_height + us.playerBarFontOffset, 1);
+	adjustedSettings.playerBarSettings.barWidth = ns.playerBarSettings.barWidth * us.playerBarScaleX;
+	adjustedSettings.playerBarSettings.barSpacing = ns.playerBarSettings.barSpacing * us.playerBarScaleX;
+	adjustedSettings.playerBarSettings.barHeight = ns.playerBarSettings.barHeight * us.playerBarScaleY;
+	adjustedSettings.playerBarSettings.font_settings.font_height = math.max(ns.playerBarSettings.font_settings.font_height + us.playerBarFontOffset, 1);
 
 	-- Exp Bar
-	gAdjustedSettings.expBarSettings.barWidth = ns.expBarSettings.barWidth * us.expBarScaleX;
-	gAdjustedSettings.expBarSettings.barHeight = ns.expBarSettings.barHeight * us.expBarScaleY;
-	gAdjustedSettings.expBarSettings.job_font_settings.font_height = math.max(ns.expBarSettings.job_font_settings.font_height + us.expBarFontOffset, 1);
-	gAdjustedSettings.expBarSettings.exp_font_settings.font_height = math.max(ns.expBarSettings.exp_font_settings.font_height + us.expBarFontOffset, 1);
-	gAdjustedSettings.expBarSettings.percent_font_settings.font_height = math.max(ns.expBarSettings.percent_font_settings.font_height + us.expBarFontOffset, 1);
+	adjustedSettings.expBarSettings.barWidth = ns.expBarSettings.barWidth * us.expBarScaleX;
+	adjustedSettings.expBarSettings.barHeight = ns.expBarSettings.barHeight * us.expBarScaleY;
+	adjustedSettings.expBarSettings.job_font_settings.font_height = math.max(ns.expBarSettings.job_font_settings.font_height + us.expBarFontOffset, 1);
+	adjustedSettings.expBarSettings.exp_font_settings.font_height = math.max(ns.expBarSettings.exp_font_settings.font_height + us.expBarFontOffset, 1);
+	adjustedSettings.expBarSettings.percent_font_settings.font_height = math.max(ns.expBarSettings.percent_font_settings.font_height + us.expBarFontOffset, 1);
 
 	-- Gil Tracker
-	gAdjustedSettings.gilTrackerSettings.iconScale = ns.gilTrackerSettings.iconScale * us.gilTrackerScale;
-	gAdjustedSettings.gilTrackerSettings.font_settings.font_height = math.max(ns.gilTrackerSettings.font_settings.font_height + us.gilTrackerFontOffset, 1);
+	adjustedSettings.gilTrackerSettings.iconScale = ns.gilTrackerSettings.iconScale * us.gilTrackerScale;
+	adjustedSettings.gilTrackerSettings.font_settings.font_height = math.max(ns.gilTrackerSettings.font_settings.font_height + us.gilTrackerFontOffset, 1);
 	
 	-- Inventory Tracker
-	gAdjustedSettings.inventoryTrackerSettings.dotRadius = ns.inventoryTrackerSettings.dotRadius * us.inventoryTrackerScale;
-	gAdjustedSettings.inventoryTrackerSettings.dotSpacing = ns.inventoryTrackerSettings.dotSpacing * us.inventoryTrackerScale;
-	gAdjustedSettings.inventoryTrackerSettings.groupSpacing = ns.inventoryTrackerSettings.groupSpacing * us.inventoryTrackerScale;
-	gAdjustedSettings.inventoryTrackerSettings.font_settings.font_height = math.max(ns.inventoryTrackerSettings.font_settings.font_height + us.inventoryTrackerFontOffset, 1);
+	adjustedSettings.inventoryTrackerSettings.dotRadius = ns.inventoryTrackerSettings.dotRadius * us.inventoryTrackerScale;
+	adjustedSettings.inventoryTrackerSettings.dotSpacing = ns.inventoryTrackerSettings.dotSpacing * us.inventoryTrackerScale;
+	adjustedSettings.inventoryTrackerSettings.groupSpacing = ns.inventoryTrackerSettings.groupSpacing * us.inventoryTrackerScale;
+	adjustedSettings.inventoryTrackerSettings.font_settings.font_height = math.max(ns.inventoryTrackerSettings.font_settings.font_height + us.inventoryTrackerFontOffset, 1);
 
 	-- Enemy List
-	gAdjustedSettings.enemyListSettings.barWidth = ns.enemyListSettings.barWidth * us.enemyListScaleX;
-	gAdjustedSettings.enemyListSettings.barHeight = ns.enemyListSettings.barHeight * us.enemyListScaleY;
-	gAdjustedSettings.enemyListSettings.textScale = ns.enemyListSettings.textScale * us.enemyListFontScale;
-	gAdjustedSettings.enemyListSettings.iconSize = ns.enemyListSettings.iconSize * us.enemyListIconScale;
-
-	-- Cast Bar
-	gAdjustedSettings.castBarSettings.barWidth = ns.castBarSettings.barWidth * us.castBarScaleX;
-	gAdjustedSettings.castBarSettings.barHeight = ns.castBarSettings.barHeight * us.castBarScaleY;
-	gAdjustedSettings.castBarSettings.spell_font_settings.font_height = math.max(ns.castBarSettings.spell_font_settings.font_height + us.castBarFontOffset, 1);
-	gAdjustedSettings.castBarSettings.percent_font_settings.font_height = math.max(ns.castBarSettings.percent_font_settings.font_height + us.castBarFontOffset, 1);
+	adjustedSettings.enemyListSettings.barWidth = ns.enemyListSettings.barWidth * us.enemyListScaleX;
+	adjustedSettings.enemyListSettings.barHeight = ns.enemyListSettings.barHeight * us.enemyListScaleY;
+	adjustedSettings.enemyListSettings.textScale = ns.enemyListSettings.textScale * us.enemyListFontScale;
+	adjustedSettings.enemyListSettings.iconSize = ns.enemyListSettings.iconSize * us.enemyListIconScale;
 end
 
 function UpdateSettings()
@@ -737,83 +502,9 @@ end;
 settings.register('settings', 'settings_update', function (s)
     if (s ~= nil) then
         config = s;
-		gConfig = config.userSettings;
 		UpdateSettings();
     end
 end);
-
--- Get if we are logged in right when the addon loads
-bLoggedIn = false;
-local playerIndex = AshitaCore:GetMemoryManager():GetParty():GetMemberTargetIndex(0);
-if playerIndex ~= 0 then
-    local entity = AshitaCore:GetMemoryManager():GetEntity();
-    local flags = entity:GetRenderFlags0(playerIndex);
-    if (bit.band(flags, 0x200) == 0x200) and (bit.band(flags, 0x4000) == 0) then
-        bLoggedIn = true;
-	end
-end
-
---Thanks to Velyn for the event system and interface hidden signatures!
-local pGameMenu = ashita.memory.find('FFXiMain.dll', 0, "8B480C85C974??8B510885D274??3B05", 16, 0);
-local pEventSystem = ashita.memory.find('FFXiMain.dll', 0, "A0????????84C0741AA1????????85C0741166A1????????663B05????????0F94C0C3", 0, 0);
-local pInterfaceHidden = ashita.memory.find('FFXiMain.dll', 0, "8B4424046A016A0050B9????????E8????????F6D81BC040C3", 0, 0);
-
-local function GetMenuName()
-    local subPointer = ashita.memory.read_uint32(pGameMenu);
-    local subValue = ashita.memory.read_uint32(subPointer);
-    if (subValue == 0) then
-        return '';
-    end
-    local menuHeader = ashita.memory.read_uint32(subValue + 4);
-    local menuName = ashita.memory.read_string(menuHeader + 0x46, 16);
-    return string.gsub(menuName, '\x00', '');
-end
-
-local function GetEventSystemActive()
-    if (pEventSystem == 0) then
-        return false;
-    end
-    local ptr = ashita.memory.read_uint32(pEventSystem + 1);
-    if (ptr == 0) then
-        return false;
-    end
-
-    return (ashita.memory.read_uint8(ptr) == 1);
-
-end
-
-local function GetInterfaceHidden()
-    if (pEventSystem == 0) then
-        return false;
-    end
-    local ptr = ashita.memory.read_uint32(pInterfaceHidden + 10);
-    if (ptr == 0) then
-        return false;
-    end
-
-    return (ashita.memory.read_uint8(ptr + 0xB4) == 1);
-end
-
-function GetHidden()
-
-	if (GetEventSystemActive()) then
-		return true;
-	end
-
-	if (string.match(GetMenuName(), 'map')) then
-		return true;
-	end
-
-    if (GetInterfaceHidden()) then
-        return true;
-    end
-
-	if (bLoggedIn == false) then
-		return true;
-	end
-    
-    return false;
-end
 
 --[[
 * event: d3d_present
@@ -821,67 +512,42 @@ end
 --]]
 ashita.events.register('d3d_present', 'present_cb', function ()
 
-	if (GetHidden() == false) then
-		if (gConfig.showPlayerBar) then
-			playerBar.DrawWindow(gAdjustedSettings.playerBarSettings);
-		end
-		if (gConfig.showTargetBar) then
-			targetBar.DrawWindow(gAdjustedSettings.targetBarSettings);
-		end
-		if (gConfig.showEnemyList) then
-			enemyList.DrawWindow(gAdjustedSettings.enemyListSettings);
-		end
-		if (gConfig.showExpBar) then
-			expBar.DrawWindow(gAdjustedSettings.expBarSettings);
-		end
-		if (gConfig.showGilTracker) then
-			gilTracker.DrawWindow(gAdjustedSettings.gilTrackerSettings);
-		end
-		if (gConfig.showInventoryTracker) then
-			inventoryTracker.DrawWindow(gAdjustedSettings.inventoryTrackerSettings);
-		end
-		if (gConfig.showPartyList) then
-			partyList.DrawWindow(gAdjustedSettings.partyListSettings);
-		end
-		if (gConfig.showCastBar) then
-			castBar.DrawWindow(gAdjustedSettings.castBarSettings);
-		end
-
-		configMenu.DrawWindow();
-
-		if (gConfig.patchNotesVer < gAdjustedSettings.currentPatchVer) then
-			patchNotes.DrawWindow();
-		end
-	else
-		ForceHide();
+	imgui.PushStyleVar(ImGuiStyleVar_FrameRounding, config.userSettings.barRoundness);
+	if (config.userSettings.showPlayerBar) then
+		playerBar.DrawWindow(adjustedSettings.playerBarSettings, config.userSettings);
+	end
+	if (config.userSettings.showTargetBar) then
+		targetBar.DrawWindow(adjustedSettings.targetBarSettings, config.userSettings);
+	end
+	if (config.userSettings.showEnemyList) then
+		enemyList.DrawWindow(adjustedSettings.enemyListSettings, config.userSettings);
+	end
+	if (config.userSettings.showExpBar) then
+		expBar.DrawWindow(adjustedSettings.expBarSettings, config.userSettings);
+	end
+	if (config.userSettings.showGilTracker) then
+		gilTracker.DrawWindow(adjustedSettings.gilTrackerSettings, config.userSettings);
+	end
+	if (config.userSettings.showInventoryTracker) then
+		inventoryTracker.DrawWindow(adjustedSettings.inventoryTrackerSettings, config.userSettings);
+	end
+	if (config.userSettings.showPartyList) then
+		partyList.DrawWindow(adjustedSettings.partyListSettings, config.userSettings);
 	end
 
-	-- HXUI DEV ONLY
-	if _HXUI_DEV_HOT_RELOADING_ENABLED then
-		local currentTime = os.time();
+	configMenu.DrawWindow(config.userSettings);
 
-		if not _HXUI_DEV_HOT_RELOAD_LAST_RELOAD_TIME then
-			_HXUI_DEV_HOT_RELOAD_LAST_RELOAD_TIME = currentTime;
-		end
-
-		if _HXUI_DEV_HOT_RELOAD_LAST_RELOAD_TIME and currentTime - _HXUI_DEV_HOT_RELOAD_LAST_RELOAD_TIME > _HXUI_DEV_HOT_RELOAD_POLL_TIME_SECONDS then
-			_check_hot_reload();
-
-			_HXUI_DEV_HOT_RELOAD_LAST_RELOAD_TIME = currentTime;
-		end
-	end
+	imgui.PopStyleVar(1);
 end);
 
 ashita.events.register('load', 'load_cb', function ()
 
 	UpdateUserSettings();
-    playerBar.Initialize(gAdjustedSettings.playerBarSettings);
-	targetBar.Initialize(gAdjustedSettings.targetBarSettings);
-	expBar.Initialize(gAdjustedSettings.expBarSettings);
-	gilTracker.Initialize(gAdjustedSettings.gilTrackerSettings);
-	inventoryTracker.Initialize(gAdjustedSettings.inventoryTrackerSettings);
-	partyList.Initialize(gAdjustedSettings.partyListSettings);
-	castBar.Initialize(gAdjustedSettings.castBarSettings);
+    playerBar.Initialize(adjustedSettings.playerBarSettings);
+	expBar.Initialize(adjustedSettings.expBarSettings);
+	gilTracker.Initialize(adjustedSettings.gilTrackerSettings);
+	inventoryTracker.Initialize(adjustedSettings.inventoryTrackerSettings);
+	partyList.Initialize(adjustedSettings.partyListSettings);
 end);
 
 ashita.events.register('command', 'command_cb', function (e)
@@ -900,36 +566,17 @@ end);
 ashita.events.register('packet_in', 'packet_in_cb', function (e)
 	if (e.id == 0x0028) then
 		local actionPacket = ParseActionPacket(e);
-		
-		if actionPacket then
-			if (gConfig.showEnemyList) then
-				enemyList.HandleActionPacket(actionPacket);
-			end
-	
-			if (gConfig.showCastBar) then
-				castBar.HandleActionPacket(actionPacket);
-			end
-
-			debuffHandler.HandleActionPacket(actionPacket);
+		if (config.userSettings.showEnemyList) then
+			enemyList.HandleActionPacket(actionPacket);
 		end
 	elseif (e.id == 0x00E) then
 		local mobUpdatePacket = ParseMobUpdatePacket(e);
-		if (gConfig.showEnemyList) then
+		if (config.userSettings.showEnemyList) then
 			enemyList.HandleMobUpdatePacket(mobUpdatePacket);
 		end
 	elseif (e.id == 0x00A) then
 		enemyList.HandleZonePacket(e);
 		partyList.HandleZonePacket(e);
-		debuffHandler.HandleZonePacket(e);
-		bLoggedIn = true;
-	elseif (e.id == 0x0029) then
-		local messagePacket = ParseMessagePacket(e.data);
-		if (messagePacket) then
-			debuffHandler.HandleMessagePacket(messagePacket);
-		end
-	elseif (e.id == 0x00B) then
-		bLoggedIn = false;
-	elseif (e.id == 0x076) then
-		statusHandler.ReadPartyBuffsFromPacket(e);
 	end
+	debuffHandler.HandlePacket(e);
 end);
